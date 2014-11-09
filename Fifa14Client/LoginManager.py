@@ -6,13 +6,14 @@ from Fifa14Client.Exceptions import LoginException
 
 
 class LoginManager(object):
-    MAIN_ULTIMATE_TEAM_URL = 'http://www.easports.com/uk/fifa/football-club/ultimate-team'
-    IFRAME_FUT_URL = 'http://www.easports.com/iframe/fut/'
-    ACCOUNT_INFORMATION_URL = 'http://www.easports.com/iframe/fut/p/ut/game/fifa14/user/accountinfo?_=%s000'
-    AUTH_URL = 'http://www.easports.com/iframe/fut/p/ut/auth'
-    PHISH_URL = 'http://www.easports.com/iframe/fut/p/ut/game/fifa14/phishing/validate'
+    MAIN_ULTIMATE_TEAM_URL = 'https://www.easports.com/fifa/ultimate-team/web-app'
+    IFRAME_FUT_URL = 'https://www.easports.com/iframe/fut15/?locale=en_US&baseShowoffUrl=https://www.easports.com/fifa/ultimate-team/web-app/show-off&guest_app_uri=http://www.easports.com/fifa/ultimate-team/web-app'
+    ACCOUNT_INFORMATION_URL = 'https://www.easports.com/iframe/fut15/p/ut/game/fifa15/user/accountinfo?_=%s000'
+    AUTH_URL = 'https://www.easports.com/iframe/fut15/p/ut/auth'
+    PHISH_URL = 'https://www.easports.com/iframe/fut15/p/ut/game/fifa15/phishing/validate'
     HOST_URL = 'https://utas.%sfut.ea.com:443'
-
+    currentCookies = {}
+    
     def __init__(self, email, password, security_hash,ini_platform):
         self.email = email
         self.password = password
@@ -63,11 +64,15 @@ class LoginManager(object):
         self.remid = tokens['remid']
         next_loc = tokens['next_loc']
 
+
         #The EASFC-WEB-SESSION token is refreshed and we need to grab it
         self.easfc = self.get_easfc_second_time(next_loc)
 
+
+
         #The redirects are now done for a little bit
         #We now need to grab the futweb token
+
         tokens = self.get_futweb()
         self.futweb = tokens['futweb']
         next_loc = tokens['next_loc']
@@ -79,24 +84,29 @@ class LoginManager(object):
         #Next step is to refresh futweb token
         self.futweb = self.get_futweb_second_time(next_loc)
 
+
         #Now we need to get the NucleusID
         #it is used later as a header
         #and is needed as a variable to post for the phishing answer
         self.nucid = self.get_nucleusid()
 
+
         #We now need various account details to complete the information needed for the /auth POST
+        
         account_info_dict = self.get_account_info()
 
         self.persona_id = account_info_dict['persona_id']
         self.persona_name = account_info_dict['persona_name']
         self.platform = account_info_dict['platform']
 
+
+
         #Now we need to set up the form_data
         self.form_data = {
             'isReadOnly':False,
-            'sku':'FUT14IOS',
-            'clientVersion':8,
-            'nuc':self.nucid,
+            'sku': 'FUT15WEB',
+            'clientVersion':1,
+            'nuc':int(self.nucid),
             'nucleusPersonaId':self.persona_id,
             'nucleusPersonaDisplayName':self.persona_name,
             'nucleusPersonaPlatform':self.platform,
@@ -108,9 +118,12 @@ class LoginManager(object):
         self.form_data = json.dumps(self.form_data, separators=(',', ':'))
         #Now we need to go to /auth and grab the X-UT-SID token
         self.x_ut_sid = self.get_x_ut_sid()
+
+        
         #The last step is to grab the FUTPhishing token
         self.fut_web_phishing = self.get_fut_web_phishing()
         #return the two keys that we need to make requests on the web app
+        
         return (self.x_ut_sid, self.fut_web_phishing)
         #Fun stuff logging in right?
 
@@ -121,6 +134,7 @@ class LoginManager(object):
         returns a dict of the three values with the keys being ['xsrf','easfc','next_loc']
         """
         r = requests.get(self.MAIN_ULTIMATE_TEAM_URL, allow_redirects=False)
+        self.currentCookies = dict(self.currentCookies.items() + requests.utils.dict_from_cookiejar(r.cookies).items())
         return {
                 'xsrf':r.cookies['XSRF-TOKEN'],
                 'easfc':r.cookies['EASFC-WEB-SESSION'],
@@ -135,6 +149,7 @@ class LoginManager(object):
         r = requests.get(url, allow_redirects=False)
         next_loc = r.headers['location']
         r = requests.get(next_loc, allow_redirects=False)
+        self.currentCookies = dict(self.currentCookies.items() + requests.utils.dict_from_cookiejar(r.cookies).items())
         return {
             'jsessionid': r.cookies['JSESSIONID'],
             'next_loc': r.headers['location']
@@ -154,6 +169,7 @@ class LoginManager(object):
         r = requests.post(url, data=payload, allow_redirects=False, cookies=cookies)
         next_loc = r.headers['location']
         r = requests.get(next_loc, allow_redirects=False, headers={'Host': 'accounts.ea.com'})
+        self.currentCookies = dict(self.currentCookies.items() + requests.utils.dict_from_cookiejar(r.cookies).items())
         try:
             return{
                 'sid':r.cookies['sid'],
@@ -167,8 +183,9 @@ class LoginManager(object):
         Goes to the specified url and returns the new EASFC-WEB-SESSION cookie
         returns the EASFC-WEB-SESSION token
         """
-        cookies = {'EASFC-WEB-SESSION': self.easfc, 'hl': 'uk', 'XSRF-TOKEN': self.xsrf}
-        r = requests.get(url, cookies=cookies, allow_redirects=False)
+        r = requests.get(url, cookies=self.currentCookies, allow_redirects=False)
+        r = requests.get(r.headers['location'], cookies=self.currentCookies, allow_redirects=False)
+        self.currentCookies = dict(self.currentCookies.items() + requests.utils.dict_from_cookiejar(r.cookies).items())
         return r.cookies['EASFC-WEB-SESSION']
     def get_futweb(self):
         """
@@ -177,7 +194,7 @@ class LoginManager(object):
         keys are ['futweb','location']
         """
         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-        cookies = {'EASFC-WEB-SESSION': self.easfc, 'hl': 'uk', 'XSRF-TOKEN': self.xsrf}
+        cookies = {'EASFC-WEB-SESSION': self.easfc, 'hl': 'us', 'XSRF-TOKEN': self.xsrf}
         r = requests.get(self.IFRAME_FUT_URL, headers=headers, cookies=cookies, allow_redirects=False)
         return {
             'futweb':r.cookies['futweb'],
@@ -211,10 +228,11 @@ class LoginManager(object):
         Goes to /iframe/fut/ and parses the html to find the NucleusId
         returns the NucleusId
         """
-        cookies = {'futweb': self.futweb, 'EASFC-WEB-SESSION': self.easfc, 'hl': 'uk',
+        cookies = {'futweb': self.futweb, 'EASFC-WEB-SESSION': self.easfc, 'hl': 'us',
                    'XSRF-TOKEN': self.xsrf}
         r = requests.get(self.IFRAME_FUT_URL, cookies=cookies, allow_redirects=False)
         #regex to find the nucleus id
+        #print r.text
         m = re.findall("var EASW_ID = \'\d+\'", r.text)
         return m[0].split("'")[1]
     def get_account_info(self):
@@ -246,11 +264,19 @@ class LoginManager(object):
         Returns the X-UT-SID token
         """
         headers = {'Content-Type': 'application/json', 'Easw-Session-Data-Nucleus-Id': self.nucid,
-                   'Content-Length': len(self.form_data), 'X-UT-Route': self.HOST_URL}
-        cookies = {'futweb': self.futweb, 'EASFC-WEB-SESSION': self.easfc, 'hl': 'uk',
-                   'XSRF-TOKEN': self.xsrf, 'device_view': 'not_mobile'}
+                   'Content-Length': len(self.form_data), 'X-UT-Route': self.HOST_URL, 'X-UT-Embed-Error': 'true',
+        'Referer': 'https://www.easports.com/iframe/fut15/'}
+
+        cookies = {'futweb': self.futweb, 'EASFC-WEB-SESSION': self.easfc, 'hl': 'uks',
+                   'XSRF-TOKEN': self.xsrf}
         r = requests.post(self.AUTH_URL, headers=headers, cookies=cookies,
                           data=self.form_data)
+        #print self.AUTH_URL
+        #print r
+        #print r.cookies
+        #print r.headers
+        #print r.text
+        #print r.json
         return r.json()['sid']
 
     def get_fut_web_phishing(self):
@@ -264,7 +290,7 @@ class LoginManager(object):
                    'X-UT-Route': self.HOST_URL,
                    'X-UT-SID': self.x_ut_sid}
 
-        cookies = {'futweb': self.futweb, 'EASFC-WEB-SESSION': self.easfc, 'hl': 'uk',
+        cookies = {'futweb': self.futweb, 'EASFC-WEB-SESSION': self.easfc, 'hl': 'us',
                    'XSRF-TOKEN': self.xsrf, 'device_view': 'not_mobile'}
         payload = {'answer': self.security_hash}
         r = requests.post(self.PHISH_URL, headers=headers,cookies=cookies, data=payload)
